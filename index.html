@@ -187,17 +187,28 @@ async function handleLogin() {
 }
 
 async function handleSignup() {
-  const username = document.getElementById("signup-username").value;
-  const email = document.getElementById("signup-email").value;
+  const username = document.getElementById("signup-username").value.trim();
+  const email = document.getElementById("signup-email").value.trim();
   const password = document.getElementById("signup-password").value;
-  const { data, error } = await sb.auth.signUp({ email, password });
-  if (error) { document.getElementById("signup-error").textContent = error.message; return; }
-  if (data.user) {
-    await sb.from("profiles").insert({ id: data.user.id, username });
+
+  const { data, error } = await sb.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        username: username
+      }
+    }
+  });
+
+  if (error) {
+    document.getElementById("signup-error").textContent = error.message;
+    return;
   }
+
   document.getElementById("signup-done").style.display = "block";
 }
-
+  
 // ---- browse / upload ----
 async function loadClips() {
   const { data } = await sb.from("clips")
