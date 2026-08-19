@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/lobby/:code", "destination": "/index.html" }
+  ]
+}

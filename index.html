@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DubRoom</title>
+<style>
+  :root {
+    --bg: #121214;
+    --panel: #1c1c20;
+    --ink: #f0f0f2;
+    --muted: #9a9aa2;
+    --accent: #f5c542;
+    --danger: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+  .view { display: none; max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+  .view.active { display: block; }
+  h1 { font-size: 1.6rem; }
+  a, .link-btn { color: var(--accent); cursor: pointer; text-decoration: none; }
+  input, button {
+    font-size: 1rem;
+    padding: 10px 12px;
+    margin: 6px 0;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: var(--panel);
+    color: var(--ink);
+    width: 100%;
+  }
+  button { background: var(--accent); color: #1a1a1a; border: none; font-weight: 600; cursor: pointer; width: auto; padding: 10px 18px; }
+  button.secondary { background: var(--panel); color: var(--ink); border: 1px solid #444; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .card { background: var(--panel); border-radius: 10px; padding: 14px; margin: 10px 0; }
+  .error { color: var(--danger); font-size: 0.9rem; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  video { width: 100%; border-radius: 10px; background: #000; }
+  .char-pill { display: inline-block; padding: 8px 14px; border-radius: 999px; margin: 4px; cursor: pointer; color: #111; font-weight: 600; border: 3px solid transparent; }
+  .char-pill.mine { border-color: #fff; }
+  .char-pill.taken { opacity: 0.45; cursor: not-allowed; }
+  nav { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  nav .brand { font-weight: 700; font-size: 1.1rem; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">🎙️ DubRoom</span>
+  <span id="nav-user" class="muted"></span>
+</nav>
+
+<!-- LANDING -->
+<div id="view-landing" class="view">
+  <h1>Voiceover your favorite scenes, with your friends.</h1>
+  <p class="muted">Log in, pick a community clip, claim a character, and dub it live together.</p>
+  <button onclick="showView('login')">Log in to play</button>
+  <br /><br />
+  <a onclick="showView('signup')">Need an account? Sign up</a>
+</div>
+
+<!-- LOGIN -->
+<div id="view-login" class="view">
+  <h1>Log in</h1>
+  <input id="login-email" type="email" placeholder="Email" />
+  <input id="login-password" type="password" placeholder="Password" />
+  <button onclick="handleLogin()">Log in</button>
+  <p id="login-error" class="error"></p>
+  <p class="muted">No account? <a onclick="showView('signup')">Sign up</a></p>
+</div>
+
+<!-- SIGNUP -->
+<div id="view-signup" class="view">
+  <h1>Sign up</h1>
+  <input id="signup-username" placeholder="Username" />
+  <input id="signup-email" type="email" placeholder="Email" />
+  <input id="signup-password" type="password" placeholder="Password" />
+  <button onclick="handleSignup()">Sign up</button>
+  <p id="signup-error" class="error"></p>
+  <p id="signup-done" class="muted" style="display:none;">Check your email to confirm your account, then log in.</p>
+</div>
+
+<!-- BROWSE -->
+<div id="view-browse" class="view">
+  <h1>Community clips</h1>
+  <button class="secondary" onclick="showView('upload')">Upload a clip</button>
+  <div class="card">
+    <input id="join-code" placeholder="Have a code? Join a lobby" style="width:auto; display:inline-block;" />
+    <button class="secondary" onclick="joinByCode()">Join</button>
+  </div>
+  <div id="clip-list"></div>
+</div>
+
+<!-- UPLOAD -->
+<div id="view-upload" class="view">
+  <h1>Upload a clip</h1>
+  <p class="muted">Only upload clips you have the rights to share. Flagged clips won't publish.</p>
+  <input id="upload-title" placeholder="Title" />
+  <input id="upload-source" placeholder="Where's this from? (attribution)" />
+  <input id="upload-file" type="file" accept="video/*" />
+  <button onclick="handleUpload()">Upload</button>
+  <p id="upload-status" class="muted"></p>
+</div>
+
+<!-- LOBBY -->
+<div id="view-lobby" class="view">
+  <h1>Lobby <span id="lobby-code"></span></h1>
+  <p id="lobby-phase" class="muted">Phase: lobby</p>
+  <video id="lobby-video" muted></video>
+
+  <div id="lobby-claim-section" class="card">
+    <h3>Claim a character</h3>
+    <div id="char-pills"></div>
+    <button id="host-start-btn" class="secondary" onclick="hostAdvancePhase('watching_intro')" style="display:none;">
+      Everyone in — start (host only)
+    </button>
+  </div>
+
+  <div id="lobby-record-section" class="card" style="display:none;">
+    <h3>Your lines</h3>
+    <div id="my-lines"></div>
+  </div>
+
+  <div id="lobby-playback-section" class="card" style="display:none;">
+    <h3>The mix is ready</h3>
+    <video id="mix-video" controls></video>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+let sb = null;
+let currentUser = null;
+let currentLobby = null;
+let currentClip = null;
+let myCharacterId = null;
+let realtimeChannel = null;
+let allLines = [];
+
+// ---- view switching (explicit display, no relying on '' fallback) ----
+function showView(name) {
+  document.querySelectorAll(".view").forEach((v) => (v.style.display = "none"));
+  document.getElementById("view-" + name).style.display = "block";
+}
+
+// ---- boot ----
+(async function init() {
+  const cfg = await fetch("/api/config").then((r) => r.json());
+  sb = supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+
+  const { data } = await sb.auth.getSession();
+  if (data.session) {
+    currentUser = data.session.user;
+    document.getElementById("nav-user").textContent = currentUser.email;
+  }
+
+  route();
+})();
+
+function route() {
+  const path = window.location.pathname;
+  const lobbyMatch = path.match(/^\/lobby\/([A-Z0-9]+)/i);
+  if (lobbyMatch) {
+    if (!currentUser) { showView("login"); return; }
+    enterLobby(lobbyMatch[1].toUpperCase());
+    return;
+  }
+  showView(currentUser ? "browse" : "landing");
+  if (currentUser) loadClips();
+}
+
+// ---- auth ----
+async function handleLogin() {
+  const email = document.getElementById("login-email").value;
+  const password = document.getElementById("login-password").value;
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { document.getElementById("login-error").textContent = error.message; return; }
+  currentUser = data.user;
+  document.getElementById("nav-user").textContent = currentUser.email;
+  showView("browse");
+  loadClips();
+}
+
+async function handleSignup() {
+  const username = document.getElementById("signup-username").value;
+  const email = document.getElementById("signup-email").value;
+  const password = document.getElementById("signup-password").value;
+  const { data, error } = await sb.auth.signUp({ email, password });
+  if (error) { document.getElementById("signup-error").textContent = error.message; return; }
+  if (data.user) {
+    await sb.from("profiles").insert({ id: data.user.id, username });
+  }
+  document.getElementById("signup-done").style.display = "block";
+}
+
+// ---- browse / upload ----
+async function loadClips() {
+  const { data } = await sb.from("clips")
+    .select("id, title, source_label")
+    .eq("status", "published")
+    .order("created_at", { ascending: false });
+  const list = document.getElementById("clip-list");
+  list.innerHTML = "";
+  (data || []).forEach((c) => {
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = `<strong>${c.title}</strong> ${c.source_label ? "— " + c.source_label : ""}
+      <br/><button onclick="hostLobby('${c.id}')">Host a dub</button>`;
+    list.appendChild(div);
+  });
+}
+
+async function joinByCode() {
+  const code = document.getElementById("join-code").value.trim().toUpperCase();
+  if (!code) return;
+  window.location.href = "/lobby/" + code;
+}
+
+async function handleUpload() {
+  const title = document.getElementById("upload-title").value;
+  const sourceLabel = document.getElementById("upload-source").value;
+  const file = document.getElementById("upload-file").files[0];
+  const status = document.getElementById("upload-status");
+  if (!file || !title) { status.textContent = "Add a title and pick a file."; return; }
+
+  status.textContent = "Uploading...";
+  const path = `${currentUser.id}/${Date.now()}-${file.name}`;
+  const { error: upErr } = await sb.storage.from("clips").upload(path, file);
+  if (upErr) { status.textContent = "Error: " + upErr.message; return; }
+
+  const { data: clip, error: insErr } = await sb.from("clips").insert({
+    uploader_id: currentUser.id,
+    title,
+    source_label: sourceLabel,
+    video_path: path,
+    status: "processing",
+  }).select().single();
+  if (insErr) { status.textContent = "Error: " + insErr.message; return; }
+
+  status.textContent = "Uploaded — chopping lines and checking content...";
+  const result = await fetch("/api/process-clip", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clipId: clip.id }),
+  }).then((r) => r.json());
+
+  status.textContent = result.status === "published"
+    ? `Published with ${result.lineCount} lines!`
+    : result.status === "blocked"
+      ? "Blocked by content check: " + result.reason
+      : "Something went wrong: " + (result.error || "unknown error");
+}
+
+// ---- lobby: create / join ----
+async function hostLobby(clipId) {
+  const code = Array.from({ length: 6 }, () =>
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 33)]
+  ).join("");
+  const { data: lobby, error } = await sb.from("lobbies")
+    .insert({ code, clip_id: clipId, host_id: currentUser.id, status: "lobby" })
+    .select().single();
+  if (error) { alert(error.message); return; }
+  window.location.href = "/lobby/" + lobby.code;
+}
+
+async function enterLobby(code) {
+  const { data: lobby } = await sb.from("lobbies").select("*").eq("code", code).single();
+  if (!lobby) { alert("Lobby not found"); window.location.href = "/"; return; }
+  currentLobby = lobby;
+
+  // Join as a player if not already
+  await sb.from("lobby_players").upsert(
+    { lobby_id: lobby.id, user_id: currentUser.id },
+    { onConflict: "lobby_id,user_id" }
+  );
+
+  const { data: clip } = await sb.from("clips").select("*").eq("id", lobby.clip_id).single();
+  currentClip = clip;
+  document.getElementById("lobby-video").src = sb.storage.from("clips").getPublicUrl(clip.video_path).data.publicUrl;
+
+  const { data: chars } = await sb.from("clip_characters").select("*").eq("clip_id", clip.id);
+  const { data: lines } = await sb.from("clip_lines").select("*").eq("clip_id", clip.id).order("order_in_clip");
+  allLines = lines || [];
+
+  document.getElementById("lobby-code").textContent = code;
+  document.getElementById("host-start-btn").style.display =
+    lobby.host_id === currentUser.id ? "inline-block" : "none";
+  showView("lobby");
+
+  setupRealtime(code, chars || []);
+}
+
+function setupRealtime(code, characters) {
+  realtimeChannel = sb.channel("lobby:" + code, {
+    config: { presence: { key: currentUser.id } },
+  });
+
+  realtimeChannel
+    .on("presence", { event: "sync" }, () => {
+      const state = realtimeChannel.presenceState();
+      const claims = {};
+      Object.entries(state).forEach(([userId, metas]) => {
+        if (metas[0] && metas[0].characterId) claims[metas[0].characterId] = userId;
+      });
+      renderCharacterPills(characters, claims);
+    })
+    .on("broadcast", { event: "phase_change" }, ({ payload }) => {
+      setPhase(payload.phase);
+    })
+    .on("broadcast", { event: "mix_ready" }, ({ payload }) => {
+      document.getElementById("mix-video").src = payload.videoUrl;
+      setPhase("playback");
+    })
+    .subscribe(async (status) => {
+      if (status === "SUBSCRIBED") await realtimeChannel.track({ characterId: null });
+    });
+}
+
+function renderCharacterPills(characters, claims) {
+  const container = document.getElementById("char-pills");
+  container.innerHTML = "";
+  characters.forEach((c) => {
+    const takenBy = claims[c.id];
+    const pill = document.createElement("span");
+    pill.className = "char-pill" + (takenBy === currentUser.id ? " mine" : "") + (takenBy && takenBy !== currentUser.id ? " taken" : "");
+    pill.style.background = c.color || "#f5c542";
+    pill.textContent = c.name + (takenBy ? " ✓" : "");
+    if (!takenBy || takenBy === currentUser.id) {
+      pill.onclick = () => claimCharacter(c.id);
+    }
+    container.appendChild(pill);
+  });
+}
+
+async function claimCharacter(characterId) {
+  myCharacterId = characterId;
+  await realtimeChannel.track({ characterId });
+}
+
+async function hostAdvancePhase(next) {
+  await realtimeChannel.send({ type: "broadcast", event: "phase_change", payload: { phase: next } });
+}
+
+function setPhase(phase) {
+  document.getElementById("lobby-phase").textContent = "Phase: " + phase;
+  document.getElementById("lobby-claim-section").style.display = phase === "lobby" ? "block" : "none";
+  document.getElementById("lobby-record-section").style.display = phase === "recording" ? "block" : "none";
+  document.getElementById("lobby-playback-section").style.display = phase === "playback" ? "block" : "none";
+
+  const video = document.getElementById("lobby-video");
+  if (phase === "watching_intro") {
+    video.currentTime = 0;
+    video.play();
+    // Host auto-advances to recording once the intro clip ends
+    if (currentLobby.host_id === currentUser.id) {
+      video.onended = () => hostAdvancePhase("recording");
+    }
+  }
+  if (phase === "recording") renderMyLines();
+}
+
+function renderMyLines() {
+  const container = document.getElementById("my-lines");
+  container.innerHTML = "";
+  const myLines = allLines.filter((l) => l.character_id === myCharacterId);
+  if (!myLines.length) {
+    container.innerHTML = '<p class="muted">No lines assigned to your character yet.</p>';
+    return;
+  }
+  myLines.forEach((line) => {
+    const div = document.createElement("div");
+    div.innerHTML = `<p>${line.transcript || "(line)"}</p>
+      <button onclick="recordLine('${line.id}', ${line.start_ms}, ${line.end_ms})">Record this line</button>
+      <span id="rec-status-${line.id}" class="muted"></span>`;
+    container.appendChild(div);
+  });
+}
+
+async function recordLine(lineId, startMs, endMs) {
+  const statusEl = document.getElementById("rec-status-" + lineId);
+  const video = document.getElementById("lobby-video");
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const recorder = new MediaRecorder(stream);
+  const chunks = [];
+  recorder.ondataavailable = (e) => chunks.push(e.data);
+
+  video.currentTime = startMs / 1000;
+  await video.play();
+  recorder.start();
+  statusEl.textContent = "recording...";
+
+  await new Promise((resolve) => setTimeout(resolve, endMs - startMs));
+
+  recorder.stop();
+  video.pause();
+  stream.getTracks().forEach((t) => t.stop());
+  await new Promise((resolve) => (recorder.onstop = resolve));
+
+  const blob = new Blob(chunks, { type: "audio/webm" });
+  const { data: player } = await sb.from("lobby_players").select("id")
+    .eq("lobby_id", currentLobby.id).eq("user_id", currentUser.id).single();
+
+  const path = `${currentLobby.id}/${player.id}/${lineId}-${Date.now()}.webm`;
+  await sb.storage.from("recordings").upload(path, blob);
+  await sb.from("recordings").insert({
+    lobby_id: currentLobby.id, player_id: player.id, line_id: lineId, audio_path: path,
+  });
+
+  statusEl.textContent = "saved ✓";
+}
+</script>
+</body>
+</html>
