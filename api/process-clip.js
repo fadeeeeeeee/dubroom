@@ -16,6 +16,77 @@ function sbHeaders() {
   };
 }
 
+// Cuts the transcript into recordable lines. Two passes:
+//   1. Never cross a Whisper SEGMENT boundary — segments come from the
+//      model's own linguistic + silence detection (roughly one sentence
+//      or clause each), which is a much better "natural line" signal
+//      than raw word-to-word gaps.
+//   2. Within a segment, still split further on: an internal pause above
+//      MIN_PAUSE, or hitting MAX_LINE_MS — so one long unbroken sentence
+//      still gets cut into short, recordable bits instead of becoming
+//      one huge line.
+// Falls back to pure pause-based grouping if Groq doesn't return segments.
+function chopIntoLines(words, segments) {
+  const MIN_PAUSE = 0.35; // seconds — was 0.6, now catches more natural breaks
+  const MAX_LINE_MS = 6000; // force a split if a segment runs longer than this
+
+  function splitWordsFurther(chunk) {
+    const out = [];
+    let current = [];
+    let started = current.length ? current[0].start : null;
+    for (const w of chunk) {
+      const wouldExceed = current.length && (w.end - current[0].start) * 1000 > MAX_LINE_MS;
+      const bigPause = current.length && w.start - current[current.length - 1].end > MIN_PAUSE;
+      if (current.length && (wouldExceed || bigPause)) {
+        out.push(current);
+        current = [];
+      }
+      current.push(w);
+    }
+    if (current.length) out.push(current);
+    return out;
+  }
+
+  function toLine(chunk) {
+    return {
+      text: chunk.map((w) => w.word).join(" ").trim(),
+      startMs: Math.round(chunk[0].start * 1000),
+      endMs: Math.round(chunk[chunk.length - 1].end * 1000),
+    };
+  }
+
+  let chunks;
+  if (segments.length && words.length) {
+    chunks = [];
+    for (const seg of segments) {
+      const segWords = words.filter((w) => w.start >= seg.start - 0.05 && w.end <= seg.end + 0.05);
+      if (segWords.length) {
+        chunks.push(...splitWordsFurther(segWords));
+      } else {
+        // no word-level data landed in this segment — fall back to segment text as-is
+        chunks.push([{ word: seg.text.trim(), start: seg.start, end: seg.end }]);
+      }
+    }
+  } else {
+    chunks = splitWordsFurther(words);
+  }
+
+  const lines = chunks.map(toLine).filter((l) => l.text.length > 0);
+
+  // Merge stray sub-300ms fragments (e.g. a lone "uh") into the previous line
+  const merged = [];
+  for (const line of lines) {
+    const prev = merged[merged.length - 1];
+    if (prev && line.endMs - line.startMs < 300) {
+      prev.text = (prev.text + " " + line.text).trim();
+      prev.endMs = line.endMs;
+    } else {
+      merged.push(line);
+    }
+  }
+  return merged;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
   const { clipId } = req.body || {};
@@ -50,26 +121,9 @@ export default async function handler(req, res) {
     if (!whisperRes.ok) throw new Error(`Groq transcription failed: ${await whisperRes.text()}`);
     const whisperData = await whisperRes.json();
     const words = whisperData.words || [];
+    const segments = whisperData.segments || [];
 
-    // Group words into lines using pauses — this is the "chop into small
-    // bits" step the game needs: short, individually-recordable segments.
-    const PAUSE_THRESHOLD = 0.6;
-    const lines = [];
-    let current = [];
-    for (const w of words) {
-      if (current.length && w.start - current[current.length - 1].end > PAUSE_THRESHOLD) {
-        lines.push(current);
-        current = [];
-      }
-      current.push(w);
-    }
-    if (current.length) lines.push(current);
-
-    const rawLines = lines.map((chunk) => ({
-      text: chunk.map((w) => w.word).join(" ").trim(),
-      startMs: Math.round(chunk[0].start * 1000),
-      endMs: Math.round(chunk[chunk.length - 1].end * 1000),
-    }));
+    const rawLines = chopIntoLines(words, segments);
 
     // Moderate the full transcript with Llama Guard
     const fullText = rawLines.map((l) => l.text).join(" ");
