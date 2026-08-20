@@ -6,46 +6,35 @@
 <title>DubRoom</title>
 <style>
   :root {
-    --bg: #121214;
-    --panel: #1c1c20;
-    --ink: #f0f0f2;
-    --muted: #9a9aa2;
-    --accent: #f5c542;
-    --danger: #e5484d;
+    --bg: #121214; --panel: #1c1c20; --ink: #f0f0f2; --muted: #9a9aa2;
+    --accent: #f5c542; --danger: #e5484d; --ok: #4ade80;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: system-ui, -apple-system, sans-serif;
-  }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, sans-serif; }
   .view { display: none; max-width: 640px; margin: 0 auto; padding: 24px 16px; }
   .view.active { display: block; }
   h1 { font-size: 1.6rem; }
   a, .link-btn { color: var(--accent); cursor: pointer; text-decoration: none; }
-  input, button {
-    font-size: 1rem;
-    padding: 10px 12px;
-    margin: 6px 0;
-    border-radius: 8px;
-    border: 1px solid #333;
-    background: var(--panel);
-    color: var(--ink);
-    width: 100%;
-  }
+  input, button { font-size: 1rem; padding: 10px 12px; margin: 6px 0; border-radius: 8px; border: 1px solid #333; background: var(--panel); color: var(--ink); width: 100%; }
   button { background: var(--accent); color: #1a1a1a; border: none; font-weight: 600; cursor: pointer; width: auto; padding: 10px 18px; }
   button.secondary { background: var(--panel); color: var(--ink); border: 1px solid #444; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .card { background: var(--panel); border-radius: 10px; padding: 14px; margin: 10px 0; }
+  button.danger { background: var(--danger); color: #fff; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .card { background: var(--panel); border-radius: 10px; padding: 16px; margin: 10px 0; }
   .error { color: var(--danger); font-size: 0.9rem; }
   .muted { color: var(--muted); font-size: 0.9rem; }
-  video { width: 100%; border-radius: 10px; background: #000; }
-  .char-pill { display: inline-block; padding: 8px 14px; border-radius: 999px; margin: 4px; cursor: pointer; color: #111; font-weight: 600; border: 3px solid transparent; }
-  .char-pill.mine { border-color: #fff; }
-  .char-pill.taken { opacity: 0.45; cursor: not-allowed; }
+  video, audio { width: 100%; border-radius: 10px; background: #000; }
   nav { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
   nav .brand { font-weight: 700; font-size: 1.1rem; }
+  .progress { display: flex; gap: 4px; margin: 12px 0; }
+  .progress span { flex: 1; height: 6px; border-radius: 3px; background: #333; }
+  .progress span.done { background: var(--ok); }
+  .progress span.current { background: var(--accent); }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn-row button { flex: 1; min-width: 120px; }
+  .transcript-line { font-size: 1.3rem; text-align: center; padding: 20px 10px; }
+  .rec-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); margin-right: 6px; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
 </style>
 </head>
 <body>
@@ -57,8 +46,8 @@
 
 <!-- LANDING -->
 <div id="view-landing" class="view">
-  <h1>Voiceover your favorite scenes, with your friends.</h1>
-  <p class="muted">Log in, pick a community clip, claim a character, and dub it live together.</p>
+  <h1>Dub your favorite scenes.</h1>
+  <p class="muted">Pick a community clip, then voice every character yourself — one line at a time.</p>
   <button onclick="showView('login')">Log in to play</button>
   <br /><br />
   <a onclick="showView('signup')">Need an account? Sign up</a>
@@ -89,10 +78,6 @@
 <div id="view-browse" class="view">
   <h1>Community clips</h1>
   <button class="secondary" onclick="showView('upload')">Upload a clip</button>
-  <div class="card">
-    <input id="join-code" placeholder="Have a code? Join a lobby" style="width:auto; display:inline-block;" />
-    <button class="secondary" onclick="joinByCode()">Join</button>
-  </div>
   <div id="clip-list"></div>
 </div>
 
@@ -107,28 +92,37 @@
   <p id="upload-status" class="muted"></p>
 </div>
 
-<!-- LOBBY -->
-<div id="view-lobby" class="view">
-  <h1>Lobby <span id="lobby-code"></span></h1>
-  <p id="lobby-phase" class="muted">Phase: lobby</p>
-  <video id="lobby-video" muted></video>
+<!-- DUB SESSION (solo, line by line) -->
+<div id="view-dub" class="view">
+  <h1 id="dub-title"></h1>
+  <div class="progress" id="dub-progress"></div>
 
-  <div id="lobby-claim-section" class="card">
-    <h3>Claim a character</h3>
-    <div id="char-pills"></div>
-    <button id="host-start-btn" class="secondary" onclick="hostAdvancePhase('watching_intro')" style="display:none;">
-      Everyone in — start (host only)
-    </button>
+  <video id="dub-video" playsinline></video>
+
+  <div class="card" id="dub-line-card">
+    <p class="transcript-line" id="dub-transcript"></p>
+    <div class="btn-row">
+      <button class="secondary" onclick="playOriginal()">▶ Hear original</button>
+    </div>
+    <div class="btn-row" style="margin-top:10px;">
+      <button id="record-btn" onclick="startRecording()">🎙 Record</button>
+      <button id="playback-btn" class="secondary" onclick="playMyTake()" disabled>▶ Play your take</button>
+    </div>
+    <p id="dub-rec-status" class="muted"></p>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="secondary" onclick="nextLine(true)">Skip line</button>
+      <button onclick="nextLine(false)">Next line →</button>
+    </div>
   </div>
 
-  <div id="lobby-record-section" class="card" style="display:none;">
-    <h3>Your lines</h3>
-    <div id="my-lines"></div>
-  </div>
-
-  <div id="lobby-playback-section" class="card" style="display:none;">
-    <h3>The mix is ready</h3>
-    <video id="mix-video" controls></video>
+  <!-- Final watch-your-dub screen -->
+  <div class="card" id="dub-finished-card" style="display:none;">
+    <h2>🎬 Your dub is ready</h2>
+    <p class="muted">Playing the scene with your voice on every line you recorded.</p>
+    <button onclick="watchFinishedDub()">▶ Watch your dub</button>
+    <br/>
+    <button class="secondary" onclick="restartDub()">Dub it again</button>
+    <button class="secondary" onclick="window.location.href='/'">Back to clips</button>
   </div>
 </div>
 
@@ -136,38 +130,35 @@
 <script>
 let sb = null;
 let currentUser = null;
-let currentLobby = null;
 let currentClip = null;
-let myCharacterId = null;
-let realtimeChannel = null;
 let allLines = [];
+let lineIndex = 0;
+let myRecordings = {}; // lineId -> { blob, url }
+let mediaRecorder = null;
+let recordedChunks = [];
 
-// ---- view switching (explicit display, no relying on '' fallback) ----
 function showView(name) {
   document.querySelectorAll(".view").forEach((v) => (v.style.display = "none"));
   document.getElementById("view-" + name).style.display = "block";
 }
 
-// ---- boot ----
 (async function init() {
   const cfg = await fetch("/api/config").then((r) => r.json());
   sb = supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
-
   const { data } = await sb.auth.getSession();
   if (data.session) {
     currentUser = data.session.user;
     document.getElementById("nav-user").textContent = currentUser.email;
   }
-
   route();
 })();
 
 function route() {
   const path = window.location.pathname;
-  const lobbyMatch = path.match(/^\/lobby\/([A-Z0-9]+)/i);
-  if (lobbyMatch) {
+  const dubMatch = path.match(/^\/dub\/([a-f0-9-]+)/i);
+  if (dubMatch) {
     if (!currentUser) { showView("login"); return; }
-    enterLobby(lobbyMatch[1].toUpperCase());
+    startDubSession(dubMatch[1]);
     return;
   }
   showView(currentUser ? "browse" : "landing");
@@ -187,28 +178,15 @@ async function handleLogin() {
 }
 
 async function handleSignup() {
-  const username = document.getElementById("signup-username").value.trim();
-  const email = document.getElementById("signup-email").value.trim();
+  const username = document.getElementById("signup-username").value;
+  const email = document.getElementById("signup-email").value;
   const password = document.getElementById("signup-password").value;
-
-  const { data, error } = await sb.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        username: username
-      }
-    }
-  });
-
-  if (error) {
-    document.getElementById("signup-error").textContent = error.message;
-    return;
-  }
-
+  const { data, error } = await sb.auth.signUp({ email, password });
+  if (error) { document.getElementById("signup-error").textContent = error.message; return; }
+  if (data.user) await sb.from("profiles").insert({ id: data.user.id, username });
   document.getElementById("signup-done").style.display = "block";
 }
-  
+
 // ---- browse / upload ----
 async function loadClips() {
   const { data } = await sb.from("clips")
@@ -221,15 +199,9 @@ async function loadClips() {
     const div = document.createElement("div");
     div.className = "card";
     div.innerHTML = `<strong>${c.title}</strong> ${c.source_label ? "— " + c.source_label : ""}
-      <br/><button onclick="hostLobby('${c.id}')">Host a dub</button>`;
+      <br/><button onclick="window.location.href='/dub/${c.id}'">Dub this</button>`;
     list.appendChild(div);
   });
-}
-
-async function joinByCode() {
-  const code = document.getElementById("join-code").value.trim().toUpperCase();
-  if (!code) return;
-  window.location.href = "/lobby/" + code;
 }
 
 async function handleUpload() {
@@ -245,185 +217,189 @@ async function handleUpload() {
   if (upErr) { status.textContent = "Error: " + upErr.message; return; }
 
   const { data: clip, error: insErr } = await sb.from("clips").insert({
-    uploader_id: currentUser.id,
-    title,
-    source_label: sourceLabel,
-    video_path: path,
-    status: "processing",
+    uploader_id: currentUser.id, title, source_label: sourceLabel,
+    video_path: path, status: "processing",
   }).select().single();
   if (insErr) { status.textContent = "Error: " + insErr.message; return; }
 
   status.textContent = "Uploaded — chopping lines and checking content...";
   const result = await fetch("/api/process-clip", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clipId: clip.id }),
   }).then((r) => r.json());
 
   status.textContent = result.status === "published"
-    ? `Published with ${result.lineCount} lines!`
+    ? `Published with ${result.lineCount} lines! Go dub it from the clip list.`
     : result.status === "blocked"
       ? "Blocked by content check: " + result.reason
       : "Something went wrong: " + (result.error || "unknown error");
 }
 
-// ---- lobby: create / join ----
-async function hostLobby(clipId) {
-  const code = Array.from({ length: 6 }, () =>
-    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 33)]
-  ).join("");
-  const { data: lobby, error } = await sb.from("lobbies")
-    .insert({ code, clip_id: clipId, host_id: currentUser.id, status: "lobby" })
-    .select().single();
-  if (error) { alert(error.message); return; }
-  window.location.href = "/lobby/" + lobby.code;
-}
-
-async function enterLobby(code) {
-  const { data: lobby } = await sb.from("lobbies").select("*").eq("code", code).single();
-  if (!lobby) { alert("Lobby not found"); window.location.href = "/"; return; }
-  currentLobby = lobby;
-
-  // Join as a player if not already
-  await sb.from("lobby_players").upsert(
-    { lobby_id: lobby.id, user_id: currentUser.id },
-    { onConflict: "lobby_id,user_id" }
-  );
-
-  const { data: clip } = await sb.from("clips").select("*").eq("id", lobby.clip_id).single();
+// ---- solo dub session ----
+async function startDubSession(clipId) {
+  const { data: clip } = await sb.from("clips").select("*").eq("id", clipId).single();
+  if (!clip) { alert("Clip not found"); window.location.href = "/"; return; }
   currentClip = clip;
-  document.getElementById("lobby-video").src = sb.storage.from("clips").getPublicUrl(clip.video_path).data.publicUrl;
 
-  const { data: chars } = await sb.from("clip_characters").select("*").eq("clip_id", clip.id);
-  const { data: lines } = await sb.from("clip_lines").select("*").eq("clip_id", clip.id).order("order_in_clip");
+  const { data: lines } = await sb.from("clip_lines").select("*").eq("clip_id", clipId).order("order_in_clip");
   allLines = lines || [];
+  lineIndex = 0;
+  myRecordings = {};
 
-  document.getElementById("lobby-code").textContent = code;
-  document.getElementById("host-start-btn").style.display =
-    lobby.host_id === currentUser.id ? "inline-block" : "none";
-  showView("lobby");
+  document.getElementById("dub-title").textContent = clip.title;
+  const video = document.getElementById("dub-video");
+  video.src = sb.storage.from("clips").getPublicUrl(clip.video_path).data.publicUrl;
+  video.muted = false; // bug fix: this was hardcoded muted before, killing all audio
 
-  setupRealtime(code, chars || []);
+  showView("dub");
+  document.getElementById("dub-line-card").style.display = "block";
+  document.getElementById("dub-finished-card").style.display = "none";
+  renderProgress();
+  loadCurrentLine();
 }
 
-function setupRealtime(code, characters) {
-  realtimeChannel = sb.channel("lobby:" + code, {
-    config: { presence: { key: currentUser.id } },
+function renderProgress() {
+  const bar = document.getElementById("dub-progress");
+  bar.innerHTML = "";
+  allLines.forEach((line, i) => {
+    const seg = document.createElement("span");
+    if (i < lineIndex || myRecordings[line.id]) seg.className = "done";
+    else if (i === lineIndex) seg.className = "current";
+    bar.appendChild(seg);
   });
-
-  realtimeChannel
-    .on("presence", { event: "sync" }, () => {
-      const state = realtimeChannel.presenceState();
-      const claims = {};
-      Object.entries(state).forEach(([userId, metas]) => {
-        if (metas[0] && metas[0].characterId) claims[metas[0].characterId] = userId;
-      });
-      renderCharacterPills(characters, claims);
-    })
-    .on("broadcast", { event: "phase_change" }, ({ payload }) => {
-      setPhase(payload.phase);
-    })
-    .on("broadcast", { event: "mix_ready" }, ({ payload }) => {
-      document.getElementById("mix-video").src = payload.videoUrl;
-      setPhase("playback");
-    })
-    .subscribe(async (status) => {
-      if (status === "SUBSCRIBED") await realtimeChannel.track({ characterId: null });
-    });
 }
 
-function renderCharacterPills(characters, claims) {
-  const container = document.getElementById("char-pills");
-  container.innerHTML = "";
-  characters.forEach((c) => {
-    const takenBy = claims[c.id];
-    const pill = document.createElement("span");
-    pill.className = "char-pill" + (takenBy === currentUser.id ? " mine" : "") + (takenBy && takenBy !== currentUser.id ? " taken" : "");
-    pill.style.background = c.color || "#f5c542";
-    pill.textContent = c.name + (takenBy ? " ✓" : "");
-    if (!takenBy || takenBy === currentUser.id) {
-      pill.onclick = () => claimCharacter(c.id);
+function loadCurrentLine() {
+  if (lineIndex >= allLines.length) { showFinished(); return; }
+  const line = allLines[lineIndex];
+  document.getElementById("dub-transcript").textContent = line.transcript || "(no dialogue detected)";
+  document.getElementById("playback-btn").disabled = !myRecordings[line.id];
+  document.getElementById("dub-rec-status").textContent = "";
+  renderProgress();
+}
+
+// Plays just this line's slice of the ORIGINAL clip, audio on, so you can
+// hear the real performance before you record yours.
+function playOriginal() {
+  const line = allLines[lineIndex];
+  const video = document.getElementById("dub-video");
+  video.muted = false;
+  video.currentTime = line.start_ms / 1000;
+  video.play();
+  const stopAt = line.end_ms;
+  const check = setInterval(() => {
+    if (video.currentTime * 1000 >= stopAt) {
+      video.pause();
+      clearInterval(check);
     }
-    container.appendChild(pill);
-  });
+  }, 50);
 }
 
-async function claimCharacter(characterId) {
-  myCharacterId = characterId;
-  await realtimeChannel.track({ characterId });
-}
-
-async function hostAdvancePhase(next) {
-  await realtimeChannel.send({ type: "broadcast", event: "phase_change", payload: { phase: next } });
-}
-
-function setPhase(phase) {
-  document.getElementById("lobby-phase").textContent = "Phase: " + phase;
-  document.getElementById("lobby-claim-section").style.display = phase === "lobby" ? "block" : "none";
-  document.getElementById("lobby-record-section").style.display = phase === "recording" ? "block" : "none";
-  document.getElementById("lobby-playback-section").style.display = phase === "playback" ? "block" : "none";
-
-  const video = document.getElementById("lobby-video");
-  if (phase === "watching_intro") {
-    video.currentTime = 0;
-    video.play();
-    // Host auto-advances to recording once the intro clip ends
-    if (currentLobby.host_id === currentUser.id) {
-      video.onended = () => hostAdvancePhase("recording");
-    }
-  }
-  if (phase === "recording") renderMyLines();
-}
-
-function renderMyLines() {
-  const container = document.getElementById("my-lines");
-  container.innerHTML = "";
-  const myLines = allLines.filter((l) => l.character_id === myCharacterId);
-  if (!myLines.length) {
-    container.innerHTML = '<p class="muted">No lines assigned to your character yet.</p>';
-    return;
-  }
-  myLines.forEach((line) => {
-    const div = document.createElement("div");
-    div.innerHTML = `<p>${line.transcript || "(line)"}</p>
-      <button onclick="recordLine('${line.id}', ${line.start_ms}, ${line.end_ms})">Record this line</button>
-      <span id="rec-status-${line.id}" class="muted"></span>`;
-    container.appendChild(div);
-  });
-}
-
-async function recordLine(lineId, startMs, endMs) {
-  const statusEl = document.getElementById("rec-status-" + lineId);
-  const video = document.getElementById("lobby-video");
+// Records the mic for this line's duration while the video plays MUTED
+// underneath, for visual timing reference — this is where "no audio" was
+// happening before: it's supposed to be silent here (that's correct),
+// but the ORIGINAL bug muted every other playback too.
+async function startRecording() {
+  const line = allLines[lineIndex];
+  const video = document.getElementById("dub-video");
+  const recordBtn = document.getElementById("record-btn");
+  const status = document.getElementById("dub-rec-status");
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const recorder = new MediaRecorder(stream);
-  const chunks = [];
-  recorder.ondataavailable = (e) => chunks.push(e.data);
+  mediaRecorder = new MediaRecorder(stream);
+  recordedChunks = [];
+  mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
 
-  video.currentTime = startMs / 1000;
+  video.muted = true;
+  video.currentTime = line.start_ms / 1000;
   await video.play();
-  recorder.start();
-  statusEl.textContent = "recording...";
+  mediaRecorder.start();
+  recordBtn.disabled = true;
+  status.innerHTML = '<span class="rec-dot"></span>Recording...';
 
-  await new Promise((resolve) => setTimeout(resolve, endMs - startMs));
+  await new Promise((resolve) => setTimeout(resolve, Math.max(line.end_ms - line.start_ms, 400)));
 
-  recorder.stop();
+  mediaRecorder.stop();
   video.pause();
   stream.getTracks().forEach((t) => t.stop());
-  await new Promise((resolve) => (recorder.onstop = resolve));
+  await new Promise((resolve) => (mediaRecorder.onstop = resolve));
 
-  const blob = new Blob(chunks, { type: "audio/webm" });
-  const { data: player } = await sb.from("lobby_players").select("id")
-    .eq("lobby_id", currentLobby.id).eq("user_id", currentUser.id).single();
+  const blob = new Blob(recordedChunks, { type: "audio/webm" });
+  myRecordings[line.id] = { blob, url: URL.createObjectURL(blob) };
 
-  const path = `${currentLobby.id}/${player.id}/${lineId}-${Date.now()}.webm`;
-  await sb.storage.from("recordings").upload(path, blob);
-  await sb.from("recordings").insert({
-    lobby_id: currentLobby.id, player_id: player.id, line_id: lineId, audio_path: path,
+  recordBtn.disabled = false;
+  document.getElementById("playback-btn").disabled = false;
+  status.textContent = "Take saved ✓ — you can play it back or move on.";
+  renderProgress();
+
+  // Upload in the background so it's saved even if they close the tab
+  const path = `${currentUser.id}/${line.id}-${Date.now()}.webm`;
+  sb.storage.from("recordings").upload(path, blob).then(() => {
+    sb.from("dub_recordings").upsert(
+      { user_id: currentUser.id, clip_id: currentClip.id, line_id: line.id, audio_path: path },
+      { onConflict: "user_id,line_id" }
+    );
   });
+}
 
-  statusEl.textContent = "saved ✓";
+function playMyTake() {
+  const line = allLines[lineIndex];
+  const rec = myRecordings[line.id];
+  if (!rec) return;
+  const audio = new Audio(rec.url);
+  audio.play();
+}
+
+function nextLine(skipped) {
+  lineIndex++;
+  loadCurrentLine();
+}
+
+function showFinished() {
+  document.getElementById("dub-line-card").style.display = "none";
+  document.getElementById("dub-finished-card").style.display = "block";
+}
+
+function restartDub() {
+  lineIndex = 0;
+  myRecordings = {};
+  document.getElementById("dub-line-card").style.display = "block";
+  document.getElementById("dub-finished-card").style.display = "none";
+  loadCurrentLine();
+}
+
+// Plays the muted original video start-to-finish while scheduling each of
+// YOUR recorded takes to play at that line's start time — this is the
+// "watch the finished dub" step, done entirely client-side, no server
+// mixing/export needed for in-browser playback.
+function watchFinishedDub() {
+  const video = document.getElementById("dub-video");
+  document.getElementById("dub-finished-card").style.display = "none";
+  document.getElementById("dub-line-card").style.display = "none";
+  video.muted = true;
+  video.currentTime = 0;
+
+  const scheduled = allLines
+    .filter((l) => myRecordings[l.id])
+    .map((l) => ({ line: l, played: false }));
+
+  function tick() {
+    const nowMs = video.currentTime * 1000;
+    scheduled.forEach((s) => {
+      if (!s.played && nowMs >= s.line.start_ms) {
+        s.played = true;
+        const audio = new Audio(myRecordings[s.line.id].url);
+        audio.play();
+      }
+    });
+    if (!video.paused && !video.ended) requestAnimationFrame(tick);
+  }
+
+  video.play();
+  tick();
+  video.onended = () => {
+    document.getElementById("dub-finished-card").style.display = "block";
+  };
 }
 </script>
 </body>
