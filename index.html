@@ -284,6 +284,7 @@ function playOriginal() {
   const line = allLines[lineIndex];
   const video = document.getElementById("dub-video");
   video.muted = false;
+  video.volume = 1;
   video.currentTime = line.start_ms / 1000;
   video.play();
   const stopAt = line.end_ms;
@@ -295,10 +296,13 @@ function playOriginal() {
   }, 50);
 }
 
-// Records the mic for this line's duration while the video plays MUTED
-// underneath, for visual timing reference — this is where "no audio" was
-// happening before: it's supposed to be silent here (that's correct),
-// but the ORIGINAL bug muted every other playback too.
+// Records the mic for this line's duration while the video plays QUIETLY
+// underneath (not muted) — a low-volume reference track so it's easier to
+// follow the original's timing/delivery while you speak. NOTE: MediaRecorder
+// only captures the mic, not the tab's audio, so this quiet track can bleed
+// into your recording through speakers — headphones avoid that entirely.
+const RECORDING_REFERENCE_VOLUME = 0.15;
+
 async function startRecording() {
   const line = allLines[lineIndex];
   const video = document.getElementById("dub-video");
@@ -310,17 +314,19 @@ async function startRecording() {
   recordedChunks = [];
   mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
 
-  video.muted = true;
+  video.muted = false;
+  video.volume = RECORDING_REFERENCE_VOLUME;
   video.currentTime = line.start_ms / 1000;
   await video.play();
   mediaRecorder.start();
   recordBtn.disabled = true;
-  status.innerHTML = '<span class="rec-dot"></span>Recording...';
+  status.innerHTML = '<span class="rec-dot"></span>Recording... <span class="muted">(🎧 headphones recommended)</span>';
 
   await new Promise((resolve) => setTimeout(resolve, Math.max(line.end_ms - line.start_ms, 400)));
 
   mediaRecorder.stop();
   video.pause();
+  video.volume = 1;
   stream.getTracks().forEach((t) => t.stop());
   await new Promise((resolve) => (mediaRecorder.onstop = resolve));
 
